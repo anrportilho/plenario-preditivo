@@ -1,60 +1,113 @@
-# src/feature_engineering/create_modeling_dataset.py
+# src/modeling/train_model.py
 
 import pandas as pd
-from src.data_collection.api_client import save_to_parquet
+import numpy as np
+import lightgbm as lgb
+from sklearn.model_selection import train_test_split
+from sklearn.preprocessing import LabelEncoder
+from sklearn.metrics import accuracy_score, classification_report, confusion_matrix
+import joblib
+import os
 
 if __name__ == "__main__":
-    print("Iniciando a criação do dataset de modelagem final...")
+    print("Iniciando o pipeline de treinamento do modelo...")
 
-    # 1. Carregar os datasets
+    # 1. Carregar o dataset
     try:
-        deputies_df = pd.read_parquet('data/processed/deputies_master_table.parquet')
-        votes_df = pd.read_parquet('data/raw/votes.parquet')
-        votings_details_df = pd.read_parquet('data/processed/votings_details.parquet')
-        print("Datasets carregados com sucesso.")
-    except FileNotFoundError as e:
-        print(f"Erro: Arquivo não encontrado - {e}.")
+        df = pd.read_parquet('data/processed/modeling_dataset.parquet')
+        print(f"Dataset carregado: {len(df)} linhas, {df.shape[1]} colunas.\n")
+    except FileNotFoundError:
+        print("Erro: Arquivo 'data/processed/modeling_dataset.parquet' não encontrado.")
         exit()
 
-    # 2. Normalizar o DataFrame de votos
-    deputado_details = pd.json_normalize(votes_df['deputado_'])
-    deputado_details = deputado_details.rename(columns={'id': 'id_deputado'})
-    votes_df = pd.concat([votes_df.drop(columns=['deputado_']), deputado_details], axis=1)
+    # 2. Preparar os dados
+    target = 'tipoVoto'
 
-    # 3. Garantir tipos de dados consistentes para o merge
-    votes_df['id_votacao'] = votes_df['id_votacao'].astype(str)
-    votings_details_df['id_votacao'] = votings_details_df['id_votacao'].astype(str)
+    # Garantir que escolaridade está preenchida
+    df['escolaridade'] = df['escolaridade'].fillna('Não Informado')
 
-    # 4. Juntar votos com detalhes da votação. Usamos 'left' para manter todos os votos.
-    modeling_df = pd.merge(votes_df, votings_details_df, on='id_votacao', how='left')
+    # --- Feature Engineering ---
+    print("Realizando engenharia de features...")
 
-    # 5. Juntar com os dados dos deputados
-    modeling_df = pd.merge(modeling_df, deputies_df, on='id_deputado', how='inner')
-    print(f"Merge concluído. O dataset de modelagem tem {len(modeling_df)} linhas.")
+    # One-hot encoding para variáveis categóricas
+    X = pd.get_dummies(
+        df[['partido', 'posicao_governo', 'uf', 'escolaridade']],
+        drop_first=True
+    )
 
-    # 6. Limpar e filtrar o alvo de previsão
-    modeling_df['tipoVoto'] = modeling_df['tipoVoto'].str.strip()
-    valid_votes = ['Sim', 'Não']
-    modeling_df = modeling_df[modeling_df['tipoVoto'].isin(valid_votes)].copy()
-    print(f"Após o filtro por 'Sim' e 'Não', o dataset tem {len(modeling_df)} linhas.")
+    # Adicionar idade (numérica)
+    X['idade'] = df['idade'].values
 
-    # --- TRATAMENTO FINAL DA EMENTA ---
-    # Preenche ementas nulas (que sabemos que existem) com um texto substituto.
-    modeling_df['proposicao_ementa'].fillna('Ementa não disponível', inplace=True)
-    print("Ementas nulas foram preenchidas com um texto padrão.")
+    # Criar bins de idade para capturar padrões etários
+    faixa_idade = pd.cut(df['idade'],
+                         bins=[0, 30, 40, 50, 60, 100],
+                         labels=['18-30', '31-40', '41-50', '51-60', '60+'])
+    X_faixa = pd.get_dummies(faixa_idade, prefix='faixa_idade', drop_first=True)
+    X = pd.concat([X, X_faixa], axis=1)
 
-    # 7. Selecionar colunas finais
-    final_columns = [
-        'id_votacao', 'id_deputado', 'proposicao_ementa',
-        'nome_urna', 'partido', 'uf', 'idade', 'escolaridade', 'tipoVoto'
-    ]
-    modeling_df = modeling_df[final_columns]
+    print(f"Total de features: {X.shape[1]}")
+    print(f"Features: {list(X.columns[:10])}... (mostrando primeiras 10)\n")
 
-    # 8. Salvar
-    file_path = 'data/processed/modeling_dataset.parquet'
-    save_to_parquet(modeling_df, file_path)
+    # 3. Codificar a variável alvo
+    le = LabelEncoder()
+    y_encoded = le.fit_transform(df[target])
+    print(f"Classes: {list(le.classes_)} -> {list(range(len(le.classes_)))}")
+    print(f"Distribuição: {np.bincount(y_encoded)}\n")
 
-    print("\n--- Informações do Dataset de Modelagem Final ---")
-    modeling_df.info()
-    print("\n--- Amostra do Dataset ---")
-    print(modeling_df[['id_votacao', 'partido', 'tipoVoto', 'proposicao_ementa']].head())
+    # 4. Dividir os dados (80/20)
+    X_train, X_test, y_train, y_test = train_test_split(
+        X, y_encoded, test_size=0.2, random_state=42, stratify=y_encoded
+    )
+    print(f"Treino: {X_train.shape[0]} linhas | Teste: {X_test.shape[0]} linhas\n")
+
+    # 5. Treinar o modelo
+    print("Treinando LightGBM...")
+    model = lgb.LGBMClassifier(
+        n_estimators=100,
+        learning_rate=0.1,
+        max_depth=7,
+        num_leaves=31,
+        random_state=42,
+        class_weight='balanced',
+        verbose=-1
+    )
+    model.fit(X_train, y_train, eval_set=[(X_test, y_test)], callbacks=[lgb.early_stopping(10)])
+    print("Treinamento concluído.\n")
+
+    # 6. Salvar artefatos
+    os.makedirs('models', exist_ok=True)
+    joblib.dump(model, 'models/lgbm_model.joblib')
+    joblib.dump(le, 'models/label_encoder.joblib')
+    joblib.dump(X.columns.tolist(), 'models/feature_columns.joblib')
+    print("Modelo salvo em 'models/'\n")
+
+    # 7. Avaliar
+    y_pred_train = model.predict(X_train)
+    y_pred_test = model.predict(X_test)
+
+    accuracy_train = accuracy_score(y_train, y_pred_train)
+    accuracy_test = accuracy_score(y_test, y_pred_test)
+
+    print("=" * 60)
+    print("RESULTADOS")
+    print("=" * 60)
+    print(f"Acurácia no Treino: {accuracy_train:.4f}")
+    print(f"Acurácia no Teste:  {accuracy_test:.4f}\n")
+
+    print("--- Relatório de Classificação ---")
+    print(classification_report(y_test, y_pred_test, target_names=le.classes_))
+
+    # 8. Matriz de Confusão
+    cm = confusion_matrix(y_test, y_pred_test)
+    print("\n--- Matriz de Confusão ---")
+    print(f"                Predito: Não  Predito: Sim")
+    print(f"Real: Não          {cm[0, 0]:4d}          {cm[0, 1]:4d}")
+    print(f"Real: Sim          {cm[1, 0]:4d}          {cm[1, 1]:4d}\n")
+
+    # 9. Feature Importance
+    print("--- Top 10 Features Mais Importantes ---")
+    importance_df = pd.DataFrame({
+        'feature': X.columns,
+        'importance': model.feature_importances_
+    }).sort_values('importance', ascending=False)
+    print(importance_df.head(10).to_string(index=False))
