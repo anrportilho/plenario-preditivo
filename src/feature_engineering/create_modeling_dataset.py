@@ -5,56 +5,39 @@ from src.data_collection.api_client import save_to_parquet
 
 if __name__ == "__main__":
     print("Iniciando a criação do dataset de modelagem final...")
-
-    # 1. Carregar os datasets
     try:
         deputies_df = pd.read_parquet('data/processed/deputies_master_table.parquet')
         votes_df = pd.read_parquet('data/raw/votes.parquet')
         votings_details_df = pd.read_parquet('data/processed/votings_details.parquet')
-        print("Datasets carregados com sucesso.")
     except FileNotFoundError as e:
         print(f"Erro: Arquivo não encontrado - {e}.")
         exit()
 
-    # 2. Normalizar o DataFrame de votos
     deputado_details = pd.json_normalize(votes_df['deputado_'])
     deputado_details = deputado_details.rename(columns={'id': 'id_deputado'})
     votes_df = pd.concat([votes_df.drop(columns=['deputado_']), deputado_details], axis=1)
 
-    # 3. Garantir tipos de dados consistentes para o merge
     votes_df['id_votacao'] = votes_df['id_votacao'].astype(str)
     votings_details_df['id_votacao'] = votings_details_df['id_votacao'].astype(str)
 
-    # 4. Juntar votos com detalhes da votação. 'left' mantém todos os votos.
-    modeling_df = pd.merge(votes_df, votings_details_df, on='id_votacao', how='left')
+    votes_with_details_df = pd.merge(votes_df, votings_details_df, on='id_votacao', how='left')
+    modeling_df = pd.merge(votes_with_details_df, deputies_df, on='id_deputado', how='inner')
 
-    # 5. Juntar com os dados dos deputados
-    modeling_df = pd.merge(modeling_df, deputies_df, on='id_deputado', how='inner')
-    print(f"Merge concluído. O dataset de modelagem tem {len(modeling_df)} linhas.")
-
-    # 6. Limpar e filtrar o alvo de previsão
     modeling_df['tipoVoto'] = modeling_df['tipoVoto'].str.strip()
     valid_votes = ['Sim', 'Não']
     modeling_df = modeling_df[modeling_df['tipoVoto'].isin(valid_votes)].copy()
-
-    # 7. Tratar ementas nulas
     modeling_df['proposicao_ementa'].fillna('Ementa não disponível', inplace=True)
-    print(f"Após filtros e limpeza, o dataset final tem {len(modeling_df)} linhas.")
 
-    # 8. Selecionar colunas finais
+    # --- MUDANÇA AQUI: Adicionamos a data às colunas finais ---
     final_columns = [
-        'id_votacao', 'id_deputado', 'proposicao_ementa',
-        'nome_urna', 'partido', 'uf', 'idade', 'escolaridade', 'tipoVoto'
+        'id_votacao', 'id_deputado', 'dataRegistroVoto',  # <-- COLUNA DE DATA ADICIONADA
+        'proposicao_ementa', 'nome_urna', 'partido', 'uf',
+        'idade', 'escolaridade', 'tipoVoto'
     ]
-    # Adicionando a coluna posicao_governo que será criada no próximo script
-    if 'posicao_governo' in modeling_df.columns:
-        final_columns.insert(5, 'posicao_governo')
+    # Filtra apenas colunas que realmente existem para evitar erros
+    existing_cols = [col for col in final_columns if col in modeling_df.columns]
+    modeling_df = modeling_df[existing_cols]
 
-    modeling_df = modeling_df[final_columns]
-
-    # 9. Salvar
     file_path = 'data/processed/modeling_dataset.parquet'
     save_to_parquet(modeling_df, file_path)
-
-    print("\n--- Dataset de Modelagem Base Criado com Sucesso ---")
-    print(modeling_df.info())
+    print(f"\n✓ Dataset de modelagem base salvo em '{file_path}'")
