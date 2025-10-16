@@ -25,7 +25,6 @@ def fetch_voting_details(voting_id):
         response.raise_for_status()
         details = response.json()['dados']
 
-        # A ementa está dentro de um objeto 'proposicao'
         proposicao = details.get('proposicao', {})
 
         return {
@@ -36,17 +35,18 @@ def fetch_voting_details(voting_id):
             'proposicao_ementa': proposicao.get('ementa')
         }
     except requests.exceptions.RequestException:
-        # Silencia o erro para o loop continuar
         return None
 
 
 if __name__ == "__main__":
-    INPUT_FILE = 'data/raw/votings_list.parquet'
+    # --- MUDANÇA AQUI: Apontamos para o arquivo de votos real ---
+    INPUT_FILE = 'data/raw/votes.parquet'
     OUTPUT_FILE = 'data/processed/votings_details.parquet'
 
     # Carrega a lista de votações que precisamos processar
     try:
-        votings_list_df = pd.read_parquet(INPUT_FILE)
+        # --- MUDANÇA AQUI: Agora lemos o arquivo de votos ---
+        votes_df = pd.read_parquet(INPUT_FILE)
     except FileNotFoundError:
         print(f"Erro: Arquivo '{INPUT_FILE}' não encontrado.")
         print("Por favor, execute 'fetch_votings_data.py' primeiro.")
@@ -62,8 +62,8 @@ if __name__ == "__main__":
     else:
         processed_ids = set()
 
-    # Filtra para buscar apenas as votações que ainda não foram processadas
-    target_ids = set(votings_list_df['id'])
+    # --- MUDANÇA AQUI: Extraímos os IDs únicos da coluna 'id_votacao' ---
+    target_ids = set(votes_df['id_votacao'].unique())
     new_ids_to_fetch = list(target_ids - processed_ids)
 
     if not new_ids_to_fetch:
@@ -80,7 +80,6 @@ if __name__ == "__main__":
 
         if all_new_details:
             new_details_df = pd.DataFrame(all_new_details)
-            # Combina os resultados novos com os antigos, se houver
             combined_df = pd.concat([existing_details_df, new_details_df], ignore_index=True)
 
             save_to_parquet(combined_df, OUTPUT_FILE)
