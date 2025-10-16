@@ -6,7 +6,7 @@
 
 ## Objetivo do Projeto
 
-O "Plenar.io Preditivo" é uma plataforma de Ciência de Dados de ponta a ponta, projetada para aumentar a transparência e a profundidade da análise sobre o processo legislativo brasileiro. O sistema utiliza dados públicos da API da Câmara dos Deputados para treinar um modelo preditivo com **92.8% de acurácia**, capaz de prever o voto de parlamentares.
+O "Plenario Preditivo" é uma plataforma de Ciência de Dados de ponta a ponta, projetada para aumentar a transparência e a profundidade da análise sobre o processo legislativo brasileiro. O sistema utiliza dados públicos da API da Câmara dos Deputados para treinar um modelo preditivo com **92.8% de acurácia**, capaz de prever o voto de parlamentares.
 
 O objetivo vai além da simples previsão, buscando fornecer insights sobre o comportamento político, a coesão partidária e os fatores que influenciam as decisões no plenário.
 
