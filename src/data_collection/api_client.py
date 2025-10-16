@@ -4,6 +4,7 @@ import requests
 import pandas as pd
 import os
 
+
 # URL base da API v2 da Câmara dos Deputados
 BASE_URL = "https://dadosabertos.camara.leg.br/api/v2"
 
