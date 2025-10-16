@@ -1,0 +1,20 @@
+# Ambiente Virtual
+venv/
+.venv/
+
+# Caches do Python
+__pycache__/
+*.pyc
+
+# Arquivos de IDE (PyCharm)
+.idea/
+
+# Arquivos de dados (para não subir dados grandes para o Git)
+data/
+*.csv
+*.parquet
+
+# Arquivos de modelo
+*.pkl
+*.joblib
+*.lgb
